@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Manrope:wght@200;400;500;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-headline: "Manrope", sans-serif;
+
+  /* Surfaces */
+  --color-surface: #0e0e0e;
+  --color-surface-low: #131313;
+  --color-surface-container: #1a1a1a;
+  --color-surface-container-high: #202020;
+  --color-surface-container-highest: #272727;
+  --color-surface-high: #20201f;
+  --color-surface-highest: #262626;
+  --color-surface-bright: #2c2c2c;
+
+  /* Brand */
+  --color-primary: #b6a0ff;
+  --color-primary-dim: #7e51ff;
+  --color-primary-fixed: #d3c5ff;
+  --color-primary-fixed-dim: #9c80ff;
+  --color-on-primary-fixed-variant: #5b38c2;
+
+  --color-secondary: #00e3fd;
+  --color-secondary-dim: #00d4ec;
+
+  /* Tertiary / misc */
+  --color-tertiary-fixed: #ff9fd8;
+  --color-error: #ff5c5c;
+  --color-error-dim: #c0392b;
+
+  /* Text */
+  --color-on-surface-variant: #adaaaa;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-white font-sans antialiased selection:bg-primary/30 selection:text-primary;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-surface-highest/40 backdrop-blur-3xl border border-white/5;
+  }
+
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .pulse-button {
+    @apply bg-gradient-to-br from-primary to-primary-dim text-white shadow-lg shadow-primary/20 transition-all active:scale-95 hover:shadow-primary/40;
+  }
+}
+
+/* Range input accent color */
+input[type="range"] {
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 9999px;
+  cursor: pointer;
+  appearance: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #b6a0ff;
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #b6a0ff;
+  cursor: pointer;
+  border: none;
+}

@@ -1,0 +1,2 @@
+﻿server/index.ts(95,27): error TS2349: This expression is not callable.
+  Type 'typeof import("D:/music_player/sonic-immersive-fixed/sonic/backend/node_modules/youtube-dl-exec/src/index")' has no call signatures.

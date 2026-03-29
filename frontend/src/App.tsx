@@ -2,7 +2,7 @@ import {
   Home, Search, Library, Crown, Menu, Bell, User,
   SkipBack, Play, Pause, SkipForward, Volume2, Maximize2,
   Shuffle, Repeat, Heart, ListMusic, X, Loader2, Music, ChevronLeft,
-  Plus, Trash2, ChevronUp, ChevronDown, MoreHorizontal, Mic2, ExternalLink,
+  Plus, Trash2, MoreHorizontal, Mic2, ExternalLink,
 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -40,7 +40,6 @@ export default function App() {
 
   // ── NEW: Feature states
   const [customPlaylists, setCustomPlaylists] = useState<CustomPlaylist[]>(() => loadPlaylists());
-  const [showQueue, setShowQueue] = useState(false);
   const [lyrics, setLyrics] = useState('');
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
@@ -265,18 +264,6 @@ export default function App() {
   const removeFromQueue = useCallback((index: number) => {
     setQueue(prev => prev.filter((_, i) => i !== index));
   }, []);
-  const moveInQueue = useCallback((from: number, direction: 'up' | 'down') => {
-    setQueue(prev => {
-      const next = [...prev];
-      const to = direction === 'up' ? from - 1 : from + 1;
-      if (to < 0 || to >= next.length) return prev;
-      [next[from], next[to]] = [next[to], next[from]];
-      return next;
-    });
-  }, []);
-  const clearQueue = useCallback(() => {
-    setQueue(currentTrack ? [currentTrack] : []);
-  }, [currentTrack]);
 
   // ── Playlist CRUD
   const createPlaylist = useCallback((name: string) => {
@@ -1001,10 +988,10 @@ function NowPlayingView({
           <div className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-10 sm:gap-16 lg:gap-24 max-w-6xl mx-auto w-full">
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-xs sm:max-w-sm aspect-square rounded-2xl overflow-hidden shadow-[0_40px_120px_rgba(0,0,0,0.8)] border border-white/5 shrink-0"
-          >
-            <img src={safeCover(track.cover)} alt={track.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-          </motion.div>
+              className="w-full max-w-xs sm:max-w-sm aspect-square rounded-2xl overflow-hidden shadow-[0_40px_120px_rgba(0,0,0,0.8)] border border-white/5 shrink-0"
+            >
+              <img src={safeCover(track.cover)} alt={track.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </motion.div>
 
           <div className="w-full max-w-xl space-y-8 sm:space-y-10">
             <div className="flex items-start justify-between gap-4">

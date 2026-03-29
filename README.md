@@ -1,60 +1,84 @@
 # 🎵 The Sonic Immersive
 
-A premium Hi-Fi music player with a real backend powered by the **iTunes Search API** — 100% free, no API key required.
+A premium Hi-Fi music player with a decoupled full-stack architecture. Features robust live search, dynamic full-length audio streaming, lyrics finding, and trending tracks – seamlessly running on a modern tech stack and 100% free with no API keys required.
 
 ## Features
 
-- 🎧 **Real audio playback** — 30-second iTunes previews via HTML5 Audio
-- 🔍 **Live search** — Search any track or artist using the iTunes Search API
-- 📈 **Trending tracks** — Pulled from Apple Music's Most Played RSS feed
-- 🎭 **Genre browser** — Click any genre to explore matching tracks
-- ❤️ **Liked tracks** — Heart tracks and view them in your Library
-- 🔀 **Shuffle & Repeat** — Full queue management
-- 📱 **Fully responsive** — Works beautifully on mobile, tablet, and desktop
+- 🎧 **Full Audio Playback** — Streams full-length tracks seamlessly using a custom YouTube-DL backend audio proxy.
+- ⏭️ **Zero-Lag Preloading** — Automatically pre-resolves audio URLs for upcoming tracks to ensure gapless playback.
+- 🎤 **Lyrics Integration** — robust multi-provider lyrics lookup system with a dynamic fallback to Google Search if lyrics are unavailable.
+- 🔍 **Live Search & Metadata** — Uses iTunes Search API for lightning-fast track metadata, accurate durations, and high-quality cover art.
+- 📈 **Trending Tracks** — Pulled dynamically from Apple Music's Most Played RSS feed.
+- 🔀 **Shuffle & Repeat** — Comprehensive playlist and queue management.
+- 📱 **Fully Responsive** — Works beautifully and feels premium on mobile, tablet, and desktop visually powered by TailwindCSS and Framer Motion.
 
-## Free APIs Used
+## Tech Stack
 
-| API | What it does | Auth Required |
-|-----|-------------|---------------|
-| [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/) | Search tracks + 30s previews + artwork | None ✅ |
-| [Apple Music RSS Feed](https://rss.applemarketingtools.com/) | Most Played / Trending charts | None ✅ |
+The project has been restructured into an independent frontend and backend to facilitate easy deployment on platforms like Vercel and Render.
+
+### Frontend (`/frontend`)
+- **Framework**: React 19 + TypeScript
+- **Build Tool**: Vite
+- **Styling**: Tailwind CSS + Framer Motion + Lucide React
+- **Integration**: Environment-based dynamic base URLs for the API backend (`VITE_API_BASE_URL`).
+
+### Backend (`/backend`)
+- **Environment**: Node.js + Express
+- **Language**: TypeScript
+- **Audio Streaming**: `yt-search` and `youtube-dl-exec` for audio resolution and proxying.
+- **APIs Used**: iTunes Search API (Metadata), Apple Music RSS (Trending), multiple APIs for Lyrics (`api.lyrics.ovh`, `lyrist.vercel.app`, `api.popcat.xyz`, Vagalume).
 
 ## Getting Started
 
-```bash
-# Install dependencies
-npm install
+Because the application is split into two parts, you need to run both the frontend and the backend servers.
 
-# Start both the API server and Vite dev server
+### 1. Start the Backend API
+
+```bash
+cd backend
+npm install
 npm run dev
 ```
 
-- Frontend: http://localhost:3000  
-- API: http://localhost:3001
+The server will start on `http://localhost:3001`.
+*(Optional: Copy `.env.example` to `.env` to override the port or define custom variables).*
+
+### 2. Start the Frontend App
+
+Open a new terminal window:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The UI will be available at `http://localhost:5173`. 
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────┐
-│  Browser (React + Vite)   :3000             │
-│  ┌─────────────────────────────────────┐    │
-│  │  Vite proxy /api → localhost:3001   │    │
-│  └─────────────────────────────────────┘    │
+│  Browser (React + Vite)                     │
+│  Base API URL: http://localhost:3001        │
 └──────────────────┬──────────────────────────┘
-                   │ /api/*
+                   │ HTTP GET /api/*
 ┌──────────────────▼──────────────────────────┐
-│  Express Server           :3001             │
-│  GET /api/trending        iTunes RSS        │
-│  GET /api/search?q=       iTunes Search     │
-│  GET /api/genre/:genre    iTunes Search     │
-│  GET /api/recommendations iTunes Search     │
+│  Express Backend Server (:3001)             │
+│  - GET /api/trending   (Apple RSS)          │
+│  - GET /api/search     (iTunes Search API)  │
+│  - GET /api/stream     (yt-search & yt-dlp) │
+│  - GET /api/preload    (Audio caching)      │
+│  - GET /api/lyrics     (Multi-provider)     │
 └──────────────────┬──────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────┐
-│  iTunes / Apple Music APIs (free, no key)   │
+│  External APIs (iTunes, YouTube, Lyrics)    │
 └─────────────────────────────────────────────┘
 ```
 
-## Note on Previews
+## Note on Playback & Lyrics
 
-iTunes provides 30-second audio previews for most tracks. If a track shows "No preview available", it means Apple hasn't provided a preview URL for that particular track — this is uncommon but possible.
+Unlike projects restricted to 30-second previews, **Sonic Immersive** dynamically searches for full-length audio tracks that match the iTunes metadata's exact duration and streams the audio buffer securely through the backend. The backend dynamically matches the best audio formats on the fly. 
+
+Lyrics are fetched through multiple fallback mechanisms; if none match, the UI conveniently provides a one-click Google search fallback.

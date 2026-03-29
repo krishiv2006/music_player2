@@ -4,7 +4,15 @@ import ytSearch from 'yt-search';
 import youtubeDl from 'youtube-dl-exec';
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
-app.use(cors());
+app.use(cors({
+    origin: [
+        'http://localhost:5173',
+        'https://music-player2-your-name.vercel.app' // Add your Vercel link here
+    ],
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Range'], // Range is important for seeking audio
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
+}));
 app.use(express.json());
 function formatDuration(ms) {
     const s = Math.floor(ms / 1000);

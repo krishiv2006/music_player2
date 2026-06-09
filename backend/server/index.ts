@@ -1,13 +1,37 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
-import youtubeDl from 'youtube-dl-exec';
-import { Readable } from 'stream';
+import youtubeDl, { create } from 'youtube-dl-exec';
+
+const ytDlp: any = process.platform === 'win32'
+  ? youtubeDl
+  : create('yt-dlp');
+
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 
-app.use(cors());
+// ── Concurrency guard — prevents OOM from parallel yt-dlp calls ──
+let activeDlpCalls = 0;
+const MAX_DLP_CALLS = 3;
+
+// ── CORS — allow Vercel frontend + localhost dev ──
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  process.env.FRONTEND_URL, // e.g. https://your-app.vercel.app
+].filter(Boolean) as string[];
+
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true);
+    // In production, also allow any vercel.app subdomain
+    if (origin.endsWith('.vercel.app')) return cb(null, true);
+    cb(null, true); // permissive fallback — tighten after testing
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 function formatDuration(ms: number): string {
@@ -92,13 +116,20 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
   const videoUrl = bestVideo.url;
   console.log(`[resolveAudioUrl] resolved for "${q}" (exp: ${expectedSecs}s) → ${videoUrl} (${bestVideo.timestamp})`);
 
-  const info: any = await (youtubeDl as any)(videoUrl, {
-    dumpSingleJson: true,
-    noCheckCertificates: true,
-    noWarnings: true,
-    preferFreeFormats: true,
-    addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
-  });
+  if (activeDlpCalls >= MAX_DLP_CALLS) throw new Error('Server busy, try again');
+  activeDlpCalls++;
+  let info: any;
+  try {
+    info = await ytDlp(videoUrl, {
+      dumpSingleJson: true,
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
+    });
+  } finally {
+    activeDlpCalls--;
+  }
 
   const audioFormats = (info.formats || [])
     .filter((f: any) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'))
@@ -357,6 +388,9 @@ process.on('unhandledRejection', (reason: any) => {
   console.error('[unhandledRejection]', reason?.message || reason);
 });
 
-app.listen(PORT, () => {
-  console.log(`\n🎵 Sonic Immersive API running on http://localhost:${PORT}`);
+// ── Health check endpoint for Render ──
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🎵 Sonic Immersive API running on http://0.0.0.0:${PORT}`);
 });

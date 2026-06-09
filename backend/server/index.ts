@@ -1,11 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
-import youtubeDl, { create } from 'youtube-dl-exec';
+import youtubeDl from 'youtube-dl-exec';
 
-const ytDlp: any = process.platform === 'win32'
-  ? youtubeDl
-  : create('./yt-dlp'); // Note the ./ here!
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const raw = require('youtube-dl-exec');
+const ytDlp = process.platform === 'win32'
+  ? raw.default || raw
+  : (raw.create || raw.default?.create)('/opt/render/project/src/yt-dlp');
 
 
 

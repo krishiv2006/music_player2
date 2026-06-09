@@ -7,10 +7,7 @@ const { create } = require('youtube-dl-exec');
 const ytDlp = create('/opt/render/project/src/.venv/bin/yt-dlp');
 
 // Write YouTube cookies to disk at startup
-if (process.env.YOUTUBE_COOKIES) {
-  fs.writeFileSync('/tmp/cookies.txt', process.env.YOUTUBE_COOKIES);
-  console.log('[startup] YouTube cookies written to /tmp/cookies.txt');
-}
+
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
@@ -121,7 +118,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       noWarnings: true,
       preferFreeFormats: true,
       addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
-      ...(fs.existsSync('/tmp/cookies.txt') && { cookies: '/tmp/cookies.txt' }),
+      cookies: '/opt/render/project/src/backend/cookies.txt',
     });
   } finally {
     activeDlpCalls--;

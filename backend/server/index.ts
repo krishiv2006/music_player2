@@ -1,16 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
-import youtubeDl from 'youtube-dl-exec';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const raw = require('youtube-dl-exec');
-const ytDlp = process.platform === 'win32'
-  ? raw.default || raw
-  : (raw.create || raw.default?.create)('/opt/render/project/src/yt-dlp');
-
-
-
+const { create } = require('youtube-dl-exec');
+const ytDlp = create('/usr/local/bin/yt-dlp');
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
@@ -23,16 +16,14 @@ const MAX_DLP_CALLS = 3;
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
-  process.env.FRONTEND_URL, // e.g. https://your-app.vercel.app
+  process.env.FRONTEND_URL,
 ].filter(Boolean) as string[];
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true);
-    // In production, also allow any vercel.app subdomain
     if (origin.endsWith('.vercel.app')) return cb(null, true);
-    cb(null, true); // permissive fallback — tighten after testing
+    cb(null, true);
   },
   credentials: true,
 }));
@@ -74,10 +65,9 @@ async function itunesFetch(url: string): Promise<any> {
   return res.json();
 }
 
-// ── Simple in-memory cache for resolved audio URLs (avoids re-querying yt-dlp) ──
+// ── Simple in-memory cache for resolved audio URLs ──
 const audioCache = new Map<string, { url: string; contentType: string; expires: number }>();
 
-// Helper: resolve audio URL from YouTube (shared by /api/stream and /api/preload)
 async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: string; contentType: string } | null> {
   const cacheKey = `${q}_${expectedSecs}`;
   const cached = audioCache.get(cacheKey);
@@ -87,7 +77,6 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
 
   const cleanQ = q.replace(/\s*\(.*\)/g, '').replace(/\s*-.*$/g, '').trim();
 
-  // Parallel search attempts for speed
   const searchPromises = [
     ytSearch(cleanQ + ' full official audio'),
     ytSearch(cleanQ + ' audio'),
@@ -99,7 +88,6 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       allVideos.push(...result.value.videos);
     }
   }
-  // Deduplicate by videoId
   const seen = new Set<string>();
   allVideos = allVideos.filter(v => {
     if (seen.has(v.videoId)) return false;
@@ -109,7 +97,6 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
 
   if (allVideos.length === 0) return null;
 
-  // Strict filtering: find video within range of expected duration
   let bestVideo = null;
   if (expectedSecs > 0) {
     bestVideo = allVideos.find(v => Math.abs(v.seconds - expectedSecs) < 60);
@@ -144,7 +131,6 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
 
   const contentType = format.ext === 'webm' ? 'audio/webm' : 'audio/mp4';
 
-  // Cache for 60 minutes
   audioCache.set(cacheKey, { url: format.url, contentType, expires: Date.now() + 60 * 60 * 1000 });
 
   return { url: format.url, contentType };
@@ -236,7 +222,7 @@ app.get('/api/recommendations', async (_req, res) => {
   }
 });
 
-// GET /api/stream — proxies full audio from YouTube via yt-dlp
+// GET /api/stream
 app.get('/api/stream', async (req, res) => {
   let q = String(req.query.q || '');
   const expectedSecs = parseInt(String(req.query.duration || '0'));
@@ -246,20 +232,17 @@ app.get('/api/stream', async (req, res) => {
     const result = await resolveAudioUrl(q, expectedSecs);
     if (!result) return res.status(404).send('No audio format found');
 
-    // Proxy audio through server to avoid CORS issues with YouTube CDN
     const headers: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'Referer': 'https://www.youtube.com/',
     };
 
-    // Forward range requests for seeking support
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
     }
 
     const upstream = await fetch(result.url, { headers });
 
-    // Set response headers
     res.setHeader('Content-Type', result.contentType);
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'no-cache');
@@ -271,10 +254,8 @@ app.get('/api/stream', async (req, res) => {
       res.setHeader('Content-Range', upstream.headers.get('content-range')!);
     }
 
-    // Use 206 for range requests, 200 otherwise
     res.status(upstream.status === 206 ? 206 : 200);
 
-    // Pipe the audio stream to the response
     if (upstream.body) {
       const reader = upstream.body.getReader();
       let cancelled = false;
@@ -294,7 +275,6 @@ app.get('/api/stream', async (req, res) => {
       };
       pump();
 
-      // Clean up if client disconnects — cancel the READER, not the body
       req.on('close', () => {
         cancelled = true;
         reader.cancel().catch(() => { });
@@ -309,7 +289,7 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
-// GET /api/preload — pre-resolves audio URL and caches it (returns immediately)
+// GET /api/preload
 app.get('/api/preload', async (req, res) => {
   const q = String(req.query.q || '');
   const expectedSecs = parseInt(String(req.query.duration || '0'));
@@ -324,16 +304,13 @@ app.get('/api/preload', async (req, res) => {
   }
 });
 
-// GET /api/lyrics — robust provider lookup with multiple search variations
+// GET /api/lyrics
 app.get('/api/lyrics', async (req, res) => {
   const artist = String(req.query.artist || '').trim();
   const title = String(req.query.title || '').trim();
 
-  // Variation 1: Clean artist (first one) + Clean title
   let artistClean1 = artist.split(/[&,]/)[0].trim();
   let titleClean = title.replace(/\s*\(.*\)/g, '').replace(/\s*-.*$/g, '').trim();
-
-  // Variation 2: Full artist + Clean title
   let artistFull = artist.trim();
 
   if (!artist || !title) return res.json({ lyrics: '' });
@@ -357,7 +334,6 @@ app.get('/api/lyrics', async (req, res) => {
         const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
         if (!resp.ok) continue;
         const data: any = await resp.json();
-        // Vagalume response has a different structure
         const lyrics = data.lyrics || data.content || (data.mus && data.mus[0] && data.mus[0].text);
         if (lyrics && lyrics.trim().length > 20) {
           console.log(`[/api/lyrics] found lyrics via ${url}`);
@@ -369,7 +345,6 @@ app.get('/api/lyrics', async (req, res) => {
     }
   }
 
-  // Final hail-mary: Search Lyrist with just the title
   try {
     const finalUrl = `https://lyrist.vercel.app/api/${encodeURIComponent(titleClean)}`;
     const resp = await fetch(finalUrl, { signal: AbortSignal.timeout(5000) });
@@ -382,9 +357,6 @@ app.get('/api/lyrics', async (req, res) => {
   res.json({ lyrics: '' });
 });
 
-// Removed proxyAudio to utilize native 302 redirects for zero-lag streaming
-
-// ── Global error handlers — prevent unhandled errors from crashing the server ──
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err.message);
 });
@@ -392,7 +364,6 @@ process.on('unhandledRejection', (reason: any) => {
   console.error('[unhandledRejection]', reason?.message || reason);
 });
 
-// ── Health check endpoint for Render ──
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.listen(PORT, '0.0.0.0', () => {

@@ -1,17 +1,23 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
+import fs from 'fs';
 
 const { create } = require('youtube-dl-exec');
 const ytDlp = create('/opt/render/project/src/.venv/bin/yt-dlp');
+
+// Write YouTube cookies to disk at startup
+if (process.env.YOUTUBE_COOKIES) {
+  fs.writeFileSync('/tmp/cookies.txt', process.env.YOUTUBE_COOKIES);
+  console.log('[startup] YouTube cookies written to /tmp/cookies.txt');
+}
+
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 
-// ── Concurrency guard — prevents OOM from parallel yt-dlp calls ──
 let activeDlpCalls = 0;
 const MAX_DLP_CALLS = 3;
 
-// ── CORS — allow Vercel frontend + localhost dev ──
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
@@ -64,7 +70,6 @@ async function itunesFetch(url: string): Promise<any> {
   return res.json();
 }
 
-// ── Simple in-memory cache for resolved audio URLs ──
 const audioCache = new Map<string, { url: string; contentType: string; expires: number }>();
 
 async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: string; contentType: string } | null> {
@@ -116,6 +121,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       noWarnings: true,
       preferFreeFormats: true,
       addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
+      ...(fs.existsSync('/tmp/cookies.txt') && { cookies: '/tmp/cookies.txt' }),
     });
   } finally {
     activeDlpCalls--;

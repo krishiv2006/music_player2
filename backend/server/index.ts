@@ -3,8 +3,7 @@ import cors from 'cors';
 import ytSearch from 'yt-search';
 
 const { create } = require('youtube-dl-exec');
-const ytDlp = create('/usr/local/bin/yt-dlp');
-
+const ytDlp = create('/opt/render/project/src/.venv/bin/yt-dlp');
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 

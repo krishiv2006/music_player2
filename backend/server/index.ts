@@ -5,7 +5,9 @@ import youtubeDl, { create } from 'youtube-dl-exec';
 
 const ytDlp: any = process.platform === 'win32'
   ? youtubeDl
-  : create('yt-dlp');
+  : create('./yt-dlp'); // Note the ./ here!
+
+
 
 
 const app = express();
@@ -45,10 +47,10 @@ function transformTrack(item: any) {
     .replace('100x100bb', '400x400bb')
     .replace('100x100', '400x400')
     .replace('60x60bb', '400x400bb');
-    
+
   const title = item.trackName || item.collectionName || 'Unknown Track';
   const artist = item.artistName || 'Unknown Artist';
-  
+
   return {
     id: String(item.trackId || item.collectionId || Math.random()),
     title,
@@ -280,11 +282,11 @@ app.get('/api/stream', async (req, res) => {
           while (true) {
             const { done, value } = await reader.read();
             if (done) { if (!res.writableEnded) res.end(); break; }
-            if (res.writableEnded || cancelled) { reader.cancel().catch(() => {}); break; }
+            if (res.writableEnded || cancelled) { reader.cancel().catch(() => { }); break; }
             res.write(Buffer.from(value));
           }
         } catch (e) {
-          reader.cancel().catch(() => {});
+          reader.cancel().catch(() => { });
           if (!res.writableEnded) res.end();
         }
       };
@@ -293,7 +295,7 @@ app.get('/api/stream', async (req, res) => {
       // Clean up if client disconnects — cancel the READER, not the body
       req.on('close', () => {
         cancelled = true;
-        reader.cancel().catch(() => {});
+        reader.cancel().catch(() => { });
         if (!res.writableEnded) res.end();
       });
     } else {
@@ -324,7 +326,7 @@ app.get('/api/preload', async (req, res) => {
 app.get('/api/lyrics', async (req, res) => {
   const artist = String(req.query.artist || '').trim();
   const title = String(req.query.title || '').trim();
-  
+
   // Variation 1: Clean artist (first one) + Clean title
   let artistClean1 = artist.split(/[&,]/)[0].trim();
   let titleClean = title.replace(/\s*\(.*\)/g, '').replace(/\s*-.*$/g, '').trim();
@@ -333,7 +335,7 @@ app.get('/api/lyrics', async (req, res) => {
   let artistFull = artist.trim();
 
   if (!artist || !title) return res.json({ lyrics: '' });
-  
+
   const searchCycles = [
     { art: artistClean1, tit: titleClean },
     { art: artistFull, tit: titleClean }
@@ -373,8 +375,8 @@ app.get('/api/lyrics', async (req, res) => {
       const data = await resp.json();
       if (data.lyrics || data.content) return res.json({ lyrics: data.lyrics || data.content });
     }
-  } catch {}
-  
+  } catch { }
+
   res.json({ lyrics: '' });
 });
 

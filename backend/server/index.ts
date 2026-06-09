@@ -8,8 +8,14 @@ const ytDlp = create('/opt/render/project/src/.venv/bin/yt-dlp');
 
 // Write YouTube cookies to disk at startup
 if (process.env.YOUTUBE_COOKIES) {
-  fs.writeFileSync('/tmp/cookies.txt', process.env.YOUTUBE_COOKIES);
-  console.log('[startup] YouTube cookies written to /tmp/cookies.txt');
+  try {
+    fs.writeFileSync('/tmp/cookies.txt', process.env.YOUTUBE_COOKIES);
+    console.log('[startup] ✅ YouTube cookies written to /tmp/cookies.txt');
+  } catch (e: any) {
+    console.error('[startup] ❌ Failed to write cookies:', e.message);
+  }
+} else {
+  console.warn('[startup] ⚠️  YOUTUBE_COOKIES env var not set — yt-dlp will run without cookies!');
 }
 
 const app = express();
@@ -113,6 +119,10 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
 
   if (activeDlpCalls >= MAX_DLP_CALLS) throw new Error('Server busy, try again');
   activeDlpCalls++;
+
+  const cookiesExist = fs.existsSync('/tmp/cookies.txt');
+  console.log(`[resolveAudioUrl] cookies available: ${cookiesExist}`);
+
   let info: any;
   try {
     info = await ytDlp(videoUrl, {
@@ -121,7 +131,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       noWarnings: true,
       preferFreeFormats: true,
       addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
-      ...(fs.existsSync('/tmp/cookies.txt') && { cookies: '/tmp/cookies.txt' }),
+      ...(cookiesExist && { cookies: '/tmp/cookies.txt' }),
     });
   } finally {
     activeDlpCalls--;

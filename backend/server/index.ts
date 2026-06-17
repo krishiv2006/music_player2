@@ -57,16 +57,15 @@ async function itunesFetch(url: string): Promise<any> {
   return res.json();
 }
 
-// Piped API instances — fallback list if one is down
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi-libre.kavin.rocks',
-  'https://pipedapi.adminforge.de',
-  'https://api.piped.yt',
-  'https://pipedapi.drgns.space',
-  'https://pipedapi.darkness.services',
-  'https://piped-api.privacy.com.de',
-  'https://pipedapi.leptons.xyz',
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://invidious.privacyredirect.com',
+  'https://iv.datura.network',
+  'https://invidious.darkness.services',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.io.lol',
+  'https://invidious.perennialte.ch',
 ];
 
 const audioCache = new Map<string, { url: string; contentType: string; expires: number }>();
@@ -79,7 +78,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
     return { url: cached.url, contentType: cached.contentType };
   }
 
-  // Step 1: Find the best YouTube video ID via yt-search
+  // Step 1: Find best YouTube video via yt-search
   const cleanQ = q.replace(/\s*\(.*\)/g, '').replace(/\s*-.*$/g, '').trim();
   const searchPromises = [
     ytSearch(cleanQ + ' full official audio'),
@@ -106,7 +105,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
     return null;
   }
 
-  // Pick the best matching video by duration
+  // Pick best matching video by duration
   let bestVideo = null;
   if (expectedSecs > 0) {
     bestVideo = allVideos.find(v => Math.abs(v.seconds - expectedSecs) < 60);
@@ -117,15 +116,15 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
   const videoId = bestVideo.videoId;
   console.log(`[resolveAudioUrl] best video for "${q}" → ${videoId} (${bestVideo.timestamp})`);
 
-  // Step 2: Get audio stream URL from Piped API
+  // Step 2: Get audio stream from Invidious
   let audioUrl: string | null = null;
   let contentType = 'audio/webm';
 
-  for (const instance of PIPED_INSTANCES) {
+  for (const instance of INVIDIOUS_INSTANCES) {
     try {
-      console.log(`[resolveAudioUrl] trying Piped instance: ${instance}`);
-      const res = await fetch(`${instance}/streams/${videoId}`, {
-        headers: { 'User-Agent': 'SonicImmersive/1.0' },
+      console.log(`[resolveAudioUrl] trying Invidious: ${instance}`);
+      const res = await fetch(`${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         signal: AbortSignal.timeout(8000),
       });
 
@@ -135,29 +134,21 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       }
 
       const data = await res.json();
+      const formats: any[] = data.adaptiveFormats || [];
 
-      // Pick the best audio stream (highest quality, audio-only)
-      const audioStreams: any[] = data.audioStreams || [];
-      if (audioStreams.length === 0) {
-        console.warn(`[resolveAudioUrl] no audio streams from ${instance}`);
+      // Audio only formats, sorted by bitrate descending
+      const audioOnly = formats
+        .filter((f: any) => f.type?.startsWith('audio/') && f.url)
+        .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+
+      const best = audioOnly[0];
+      if (!best?.url) {
+        console.warn(`[resolveAudioUrl] no audio formats from ${instance}`);
         continue;
       }
 
-      // Sort by bitrate descending, prefer m4a/mp4 over webm
-      const sorted = audioStreams.sort((a: any, b: any) => {
-        const bitrateScore = (b.bitrate || 0) - (a.bitrate || 0);
-        if (bitrateScore !== 0) return bitrateScore;
-        // prefer m4a
-        if (a.mimeType?.includes('mp4') && !b.mimeType?.includes('mp4')) return -1;
-        if (!a.mimeType?.includes('mp4') && b.mimeType?.includes('mp4')) return 1;
-        return 0;
-      });
-
-      const best = sorted[0];
-      if (!best?.url) continue;
-
       audioUrl = best.url;
-      contentType = best.mimeType?.includes('mp4') ? 'audio/mp4' : 'audio/webm';
+      contentType = best.type?.includes('mp4') ? 'audio/mp4' : 'audio/webm';
       console.log(`[resolveAudioUrl] ✅ got audio from ${instance} — type: ${contentType}, bitrate: ${best.bitrate}`);
       break;
 
@@ -168,7 +159,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
   }
 
   if (!audioUrl) {
-    console.error(`[resolveAudioUrl] all Piped instances failed for "${q}"`);
+    console.error(`[resolveAudioUrl] all Invidious instances failed for "${q}"`);
     return null;
   }
 

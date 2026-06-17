@@ -60,9 +60,13 @@ async function itunesFetch(url: string): Promise<any> {
 // Piped API instances — fallback list if one is down
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
-  'https://piped-api.garudalinux.org',
-  'https://api.piped.projectsegfau.lt',
-  'https://pipedapi.coldforge.xyz',
+  'https://pipedapi-libre.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.yt',
+  'https://pipedapi.drgns.space',
+  'https://pipedapi.darkness.services',
+  'https://piped-api.privacy.com.de',
+  'https://pipedapi.leptons.xyz',
 ];
 
 const audioCache = new Map<string, { url: string; contentType: string; expires: number }>();

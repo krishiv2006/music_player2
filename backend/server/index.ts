@@ -23,9 +23,9 @@ if (process.env.YOUTUBE_COOKIES) {
 // Find yt-dlp binary
 function getYtDlpPath(): string {
   const candidates = [
+    '/opt/render/project/src/yt-dlp',
     '/usr/local/bin/yt-dlp',
     '/usr/bin/yt-dlp',
-    '/opt/render/project/src/.venv/bin/yt-dlp',
   ];
   for (const p of candidates) {
     if (fs.existsSync(p)) {

@@ -1,9 +1,51 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
+import fs from 'fs';
+import { execSync } from 'child_process';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+
+// Write YouTube cookies from env var to disk at startup
+const COOKIES_PATH = '/tmp/yt_cookies.txt';
+if (process.env.YOUTUBE_COOKIES) {
+  try {
+    fs.writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES);
+    console.log('[startup] ✅ YouTube cookies written to', COOKIES_PATH);
+  } catch (e: any) {
+    console.error('[startup] ❌ Failed to write cookies:', e.message);
+  }
+} else {
+  console.warn('[startup] ⚠️ YOUTUBE_COOKIES env var not set!');
+}
+
+// Find yt-dlp binary
+function getYtDlpPath(): string {
+  const candidates = [
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    '/opt/render/project/src/.venv/bin/yt-dlp',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      console.log('[startup] ✅ Found yt-dlp at:', p);
+      return p;
+    }
+  }
+  // Try which
+  try {
+    const p = execSync('which yt-dlp').toString().trim();
+    if (p) {
+      console.log('[startup] ✅ Found yt-dlp via which:', p);
+      return p;
+    }
+  } catch { }
+  console.warn('[startup] ⚠️ yt-dlp not found, will try "yt-dlp" directly');
+  return 'yt-dlp';
+}
+
+const YTDLP_PATH = getYtDlpPath();
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -57,18 +99,9 @@ async function itunesFetch(url: string): Promise<any> {
   return res.json();
 }
 
-const INVIDIOUS_INSTANCES = [
-  'https://inv.nadeko.net',
-  'https://invidious.fdn.fr',
-  'https://invidious.privacyredirect.com',
-  'https://iv.datura.network',
-  'https://invidious.darkness.services',
-  'https://invidious.nerdvpn.de',
-  'https://invidious.io.lol',
-  'https://invidious.perennialte.ch',
-];
-
 const audioCache = new Map<string, { url: string; contentType: string; expires: number }>();
+let activeDlpCalls = 0;
+const MAX_DLP_CALLS = 3;
 
 async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: string; contentType: string } | null> {
   const cacheKey = `${q}_${expectedSecs}`;
@@ -113,59 +146,65 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
   }
   if (!bestVideo) bestVideo = allVideos.find(v => v.seconds > 60) || allVideos[0];
 
-  const videoId = bestVideo.videoId;
-  console.log(`[resolveAudioUrl] best video for "${q}" → ${videoId} (${bestVideo.timestamp})`);
+  const videoUrl = bestVideo.url;
+  console.log(`[resolveAudioUrl] best video for "${q}" → ${videoUrl} (${bestVideo.timestamp})`);
 
-  // Step 2: Get audio stream from Invidious
-  let audioUrl: string | null = null;
-  let contentType = 'audio/webm';
+  if (activeDlpCalls >= MAX_DLP_CALLS) throw new Error('Server busy, try again');
+  activeDlpCalls++;
 
-  for (const instance of INVIDIOUS_INSTANCES) {
-    try {
-      console.log(`[resolveAudioUrl] trying Invidious: ${instance}`);
-      const res = await fetch(`${instance}/api/v1/videos/${videoId}?fields=adaptiveFormats`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        signal: AbortSignal.timeout(8000),
-      });
+  const cookiesExist = fs.existsSync(COOKIES_PATH);
+  console.log(`[resolveAudioUrl] yt-dlp path: ${YTDLP_PATH}, cookies: ${cookiesExist}`);
 
-      if (!res.ok) {
-        console.warn(`[resolveAudioUrl] ${instance} returned ${res.status}`);
-        continue;
-      }
+  let info: any;
+  try {
+    // Build yt-dlp args
+    const args = [
+      '--dump-single-json',
+      '--no-check-certificates',
+      '--no-warnings',
+      '--prefer-free-formats',
+      '--add-header', 'referer:youtube.com',
+      '--add-header', 'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    ];
 
-      const data = await res.json();
-      const formats: any[] = data.adaptiveFormats || [];
-
-      // Audio only formats, sorted by bitrate descending
-      const audioOnly = formats
-        .filter((f: any) => f.type?.startsWith('audio/') && f.url)
-        .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-
-      const best = audioOnly[0];
-      if (!best?.url) {
-        console.warn(`[resolveAudioUrl] no audio formats from ${instance}`);
-        continue;
-      }
-
-      audioUrl = best.url;
-      contentType = best.type?.includes('mp4') ? 'audio/mp4' : 'audio/webm';
-      console.log(`[resolveAudioUrl] ✅ got audio from ${instance} — type: ${contentType}, bitrate: ${best.bitrate}`);
-      break;
-
-    } catch (e: any) {
-      console.warn(`[resolveAudioUrl] ${instance} failed: ${e.message}`);
-      continue;
+    if (cookiesExist) {
+      args.push('--cookies', COOKIES_PATH);
     }
+
+    args.push(videoUrl);
+
+    // Run yt-dlp as a child process
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+
+    const { stdout } = await execFileAsync(YTDLP_PATH, args, {
+      timeout: 30000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+
+    info = JSON.parse(stdout);
+  } finally {
+    activeDlpCalls--;
   }
 
-  if (!audioUrl) {
-    console.error(`[resolveAudioUrl] all Invidious instances failed for "${q}"`);
+  // Get best audio-only format
+  const audioFormats = (info.formats || [])
+    .filter((f: any) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none') && f.url)
+    .sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0));
+
+  const format = audioFormats[0];
+  if (!format?.url) {
+    console.error('[resolveAudioUrl] no audio format found in yt-dlp output');
     return null;
   }
 
+  const contentType = format.ext === 'webm' ? 'audio/webm' : 'audio/mp4';
+  console.log(`[resolveAudioUrl] ✅ got audio url, ext: ${format.ext}, abr: ${format.abr}`);
+
   // Cache for 1 hour
-  audioCache.set(cacheKey, { url: audioUrl, contentType, expires: Date.now() + 60 * 60 * 1000 });
-  return { url: audioUrl, contentType };
+  audioCache.set(cacheKey, { url: format.url, contentType, expires: Date.now() + 60 * 60 * 1000 });
+  return { url: format.url, contentType };
 }
 
 // GET /api/trending

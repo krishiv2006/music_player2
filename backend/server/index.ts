@@ -162,7 +162,7 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       '--dump-single-json',
       '--no-check-certificates',
       '--no-warnings',
-      '--prefer-free-formats',
+      '-f', 'bestaudio/best',
       '--add-header', 'referer:youtube.com',
       '--add-header', 'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     ];

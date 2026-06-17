@@ -1,28 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import ytSearch from 'yt-search';
-import fs from 'fs';
-
-const { create } = require('youtube-dl-exec');
-const ytDlp = create('/opt/render/project/src/.venv/bin/yt-dlp');
-
-// Write YouTube cookies to disk at startup
-if (process.env.YOUTUBE_COOKIES) {
-  try {
-    fs.writeFileSync('/tmp/cookies.txt', process.env.YOUTUBE_COOKIES);
-    console.log('[startup] ✅ YouTube cookies written to /tmp/cookies.txt');
-  } catch (e: any) {
-    console.error('[startup] ❌ Failed to write cookies:', e.message);
-  }
-} else {
-  console.warn('[startup] ⚠️  YOUTUBE_COOKIES env var not set — yt-dlp will run without cookies!');
-}
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
-
-let activeDlpCalls = 0;
-const MAX_DLP_CALLS = 3;
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -62,7 +43,7 @@ function transformTrack(item: any) {
     cover: cover || `https://picsum.photos/seed/${item.trackId}/400/400`,
     duration: item.trackTimeMillis ? formatDuration(item.trackTimeMillis) : '0:00',
     album: item.collectionName || '',
-    preview: `/api/stream?q=${encodeURIComponent(title + ' ' + artist)}`,
+    preview: item.previewUrl || '',
     genre: item.primaryGenreName || '',
   };
 }
@@ -76,17 +57,26 @@ async function itunesFetch(url: string): Promise<any> {
   return res.json();
 }
 
+// Piped API instances — fallback list if one is down
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://piped-api.garudalinux.org',
+  'https://api.piped.projectsegfau.lt',
+  'https://pipedapi.coldforge.xyz',
+];
+
 const audioCache = new Map<string, { url: string; contentType: string; expires: number }>();
 
 async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: string; contentType: string } | null> {
   const cacheKey = `${q}_${expectedSecs}`;
   const cached = audioCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) {
+    console.log(`[resolveAudioUrl] cache hit for "${q}"`);
     return { url: cached.url, contentType: cached.contentType };
   }
 
+  // Step 1: Find the best YouTube video ID via yt-search
   const cleanQ = q.replace(/\s*\(.*\)/g, '').replace(/\s*-.*$/g, '').trim();
-
   const searchPromises = [
     ytSearch(cleanQ + ' full official audio'),
     ytSearch(cleanQ + ' audio'),
@@ -98,6 +88,8 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
       allVideos.push(...result.value.videos);
     }
   }
+
+  // Deduplicate
   const seen = new Set<string>();
   allVideos = allVideos.filter(v => {
     if (seen.has(v.videoId)) return false;
@@ -105,8 +97,12 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
     return true;
   });
 
-  if (allVideos.length === 0) return null;
+  if (allVideos.length === 0) {
+    console.error(`[resolveAudioUrl] no videos found for "${q}"`);
+    return null;
+  }
 
+  // Pick the best matching video by duration
   let bestVideo = null;
   if (expectedSecs > 0) {
     bestVideo = allVideos.find(v => Math.abs(v.seconds - expectedSecs) < 60);
@@ -114,41 +110,67 @@ async function resolveAudioUrl(q: string, expectedSecs: number): Promise<{ url: 
   }
   if (!bestVideo) bestVideo = allVideos.find(v => v.seconds > 60) || allVideos[0];
 
-  const videoUrl = bestVideo.url;
-  console.log(`[resolveAudioUrl] resolved for "${q}" (exp: ${expectedSecs}s) → ${videoUrl} (${bestVideo.timestamp})`);
+  const videoId = bestVideo.videoId;
+  console.log(`[resolveAudioUrl] best video for "${q}" → ${videoId} (${bestVideo.timestamp})`);
 
-  if (activeDlpCalls >= MAX_DLP_CALLS) throw new Error('Server busy, try again');
-  activeDlpCalls++;
+  // Step 2: Get audio stream URL from Piped API
+  let audioUrl: string | null = null;
+  let contentType = 'audio/webm';
 
-  const cookiesExist = fs.existsSync('/tmp/cookies.txt');
-  console.log(`[resolveAudioUrl] cookies available: ${cookiesExist}`);
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      console.log(`[resolveAudioUrl] trying Piped instance: ${instance}`);
+      const res = await fetch(`${instance}/streams/${videoId}`, {
+        headers: { 'User-Agent': 'SonicImmersive/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
 
-  let info: any;
-  try {
-    info = await ytDlp(videoUrl, {
-      dumpSingleJson: true,
-      noCheckCertificates: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
-      ...(cookiesExist && { cookies: '/tmp/cookies.txt' }),
-    });
-  } finally {
-    activeDlpCalls--;
+      if (!res.ok) {
+        console.warn(`[resolveAudioUrl] ${instance} returned ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+
+      // Pick the best audio stream (highest quality, audio-only)
+      const audioStreams: any[] = data.audioStreams || [];
+      if (audioStreams.length === 0) {
+        console.warn(`[resolveAudioUrl] no audio streams from ${instance}`);
+        continue;
+      }
+
+      // Sort by bitrate descending, prefer m4a/mp4 over webm
+      const sorted = audioStreams.sort((a: any, b: any) => {
+        const bitrateScore = (b.bitrate || 0) - (a.bitrate || 0);
+        if (bitrateScore !== 0) return bitrateScore;
+        // prefer m4a
+        if (a.mimeType?.includes('mp4') && !b.mimeType?.includes('mp4')) return -1;
+        if (!a.mimeType?.includes('mp4') && b.mimeType?.includes('mp4')) return 1;
+        return 0;
+      });
+
+      const best = sorted[0];
+      if (!best?.url) continue;
+
+      audioUrl = best.url;
+      contentType = best.mimeType?.includes('mp4') ? 'audio/mp4' : 'audio/webm';
+      console.log(`[resolveAudioUrl] ✅ got audio from ${instance} — type: ${contentType}, bitrate: ${best.bitrate}`);
+      break;
+
+    } catch (e: any) {
+      console.warn(`[resolveAudioUrl] ${instance} failed: ${e.message}`);
+      continue;
+    }
   }
 
-  const audioFormats = (info.formats || [])
-    .filter((f: any) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'))
-    .sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0));
+  if (!audioUrl) {
+    console.error(`[resolveAudioUrl] all Piped instances failed for "${q}"`);
+    return null;
+  }
 
-  const format = audioFormats[0];
-  if (!format?.url) return null;
-
-  const contentType = format.ext === 'webm' ? 'audio/webm' : 'audio/mp4';
-
-  audioCache.set(cacheKey, { url: format.url, contentType, expires: Date.now() + 60 * 60 * 1000 });
-
-  return { url: format.url, contentType };
+  // Cache for 1 hour
+  audioCache.set(cacheKey, { url: audioUrl, contentType, expires: Date.now() + 60 * 60 * 1000 });
+  return { url: audioUrl, contentType };
 }
 
 // GET /api/trending
